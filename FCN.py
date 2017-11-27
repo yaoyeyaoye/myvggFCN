@@ -25,12 +25,15 @@ tf.flags.DEFINE_string("zone", "SYMMETRY-5", "Mode train/ test/ visualize")
 TRAINING_PATH = '/Users/yaoye/PycharmProjects/myvggFCN/Data_zoo/FlowData/training'
 VALIDATION_PATH = '/Users/yaoye/PycharmProjects/myvggFCN/Data_zoo/FlowData/validation'
 
+# TRAINING_PATH = '/Users/yaoye/PycharmProjects/myvggFCN/Data_zoo/test/training'
+# VALIDATION_PATH = '/Users/yaoye/PycharmProjects/myvggFCN/Data_zoo/test/validation'
+
 
 MODEL_URL = 'http://www.vlfeat.org/matconvnet/models/beta16/imagenet-vgg-verydeep-19.mat'
 
-MAX_ITERATION = int(1e5 + 1)
-NUM_OF_CLASSESS = 151
-IMAGE_SIZE = 224
+MAX_ITERATION = int(1e3 + 1)
+NUM_OF_CLASSESS = 1
+IMAGE_SIZE = 100
 
 
 def vgg_net(weights, image):
@@ -64,16 +67,22 @@ def vgg_net(weights, image):
     current = image
     for i, name in enumerate(layers): # 对于一个可迭代/可遍历的对象（如列表、字符串），enumerate将其组成一个索引序列，利用它可以同时获得索引和值
         kind = name[:4]
-        if kind == 'conv':
+        num = name[4:]
+        if kind == 'conv' and num == '1_1':
+            W = utils.weight_variable([3, 3, 4, 64], name=name + "_w")  # [patch 7*7,insize 512, outsize 4096]
+            b = utils.bias_variable([64],  name=name + "_b")
+            current = utils.conv2d_basic(current, W, b)
+
+        elif kind == 'conv' and num != '1_1':
             kernels, bias = weights[i][0][0][0][0]
-            print("kernels:",i,kernels)
+            # print("kernels:",i,kernels)
             # print kernels
             # matconvnet: weights are [width, height, in_channels, out_channels]
             # tensorflow: weights are [height, width, in_channels, out_channels]
             kernels = utils.get_variable(np.transpose(kernels, (1, 0, 2, 3)), name=name + "_w")
-            print(kernels)
+            # print(kernels)
             bias = utils.get_variable(bias.reshape(-1), name=name + "_b")
-            print(bias)
+            # print(bias)
             current = utils.conv2d_basic(current, kernels, bias)
         elif kind == 'relu':
             current = tf.nn.relu(current, name=name)
@@ -89,7 +98,7 @@ def vgg_net(weights, image):
 def inference(image, keep_prob):
     """
     Semantic segmentation network definition
-    :param image: input image. Should have values in range 0-255
+    :param image: input image. Should have values in range 0-224
     :param keep_prob:
     :return:
     """
@@ -106,17 +115,17 @@ def inference(image, keep_prob):
     '''
     # print(model_data['classes'])
 
-    mean = model_data['normalization'][0][0][0] # (224, 224, 3)
-    mean_pixel = np.mean(mean , axis=(0, 1))
-    # print (model_data['normalization'])
+    # mean = model_data['normalization'][0][0][0] # (224, 224, 3)
+    # mean_pixel = np.mean(mean , axis=(0, 1)) # mean_pixel： [ 123.68   116.779  103.939]
+    # print ("mean_pixel：",mean_pixel)
 
     weights = np.squeeze(model_data['layers']) # np.squeeze：从数组的形状中删除单维条目，即把shape中为1的维度去掉
 
-    processed_image = utils.process_image(image, mean_pixel)
+    # processed_image = utils.process_image(image, mean_pixel)
 
     with tf.variable_scope("inference"):
         # 定义前5层的vggnet
-        image_net = vgg_net(weights, processed_image)
+        image_net = vgg_net(weights, image)
         conv_final_layer = image_net["conv5_3"]
         pool5 = utils.max_pool_2x2(conv_final_layer)
         # 从第六层开始往下定义
@@ -159,10 +168,11 @@ def inference(image, keep_prob):
         W_t3 = utils.weight_variable([16, 16, NUM_OF_CLASSESS, deconv_shape2[3].value], name="W_t3")
         b_t3 = utils.bias_variable([NUM_OF_CLASSESS], name="b_t3")
         conv_t3 = utils.conv2d_transpose_strided(fuse_2, W_t3, b_t3, output_shape=deconv_shape3, stride=8)
+        # print(conv_t3.shape)
+        # annotation_pred = tf.argmax(conv_t3, dimension=3, name="prediction") # 返回input最大值的索引index
 
-        annotation_pred = tf.argmax(conv_t3, dimension=3, name="prediction")
-
-    return tf.expand_dims(annotation_pred, dim=3), conv_t3
+    # return tf.expand_dims(annotation_pred, dim=3), conv_t3
+    return  conv_t3
 
 
 def train(loss_val, var_list):
@@ -178,20 +188,22 @@ def train(loss_val, var_list):
 def main(argv=None):
     # define placeholder for inputs layer #
     keep_probability = tf.placeholder(tf.float32, name="keep_probabilty")
-    image = tf.placeholder(tf.float32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 3], name="input_image")
-    annotation = tf.placeholder(tf.int32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 1], name="annotation")
+    image = tf.placeholder(tf.float32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 4], name="input_image")
+    annotation = tf.placeholder(tf.float32, shape=[None, IMAGE_SIZE, IMAGE_SIZE, 1], name="annotation")
 
     # create model structure #
-    pred_annotation, logits = inference(image, keep_probability)
+    # pred_annotation, logits = inference(image, keep_probability)
+    pred_annotation = inference(image, keep_probability)
+
     tf.summary.image("input_image", image, max_outputs=2)
     tf.summary.image("ground_truth", tf.cast(annotation, tf.uint8), max_outputs=2)
     tf.summary.image("pred_annotation", tf.cast(pred_annotation, tf.uint8), max_outputs=2)
-
+    # print (pred_annotation.shape)
+    # print (tf.squeeze(annotation, squeeze_dims=[3]).shape)
     # Define loss and optimizer #
-    loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,
-                                                                          labels=tf.squeeze(annotation, squeeze_dims=[3]),
-                                                                          name="entropy"))
-    tf.summary.scalar("entropy", loss)
+    # loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,labels=tf.squeeze(annotation, squeeze_dims=[3]),name="entropy"))
+    loss = tf.reduce_mean(tf.reduce_sum(tf.square(tf.reshape(pred_annotation, [-1, 1]) - tf.reshape(annotation, [-1,1])), axis = (0,1), name="L2"))
+    tf.summary.scalar("L2", loss)
 
     trainable_var = tf.trainable_variables() # 返回需要训练的变量列表
     if FLAGS.debug:
@@ -212,7 +224,11 @@ def main(argv=None):
     if FLAGS.mode == 'train':
         train_dataset_reader = dataset.BatchDatset(TRAINING_PATH,FLAGS.zone, image_options)
     validation_dataset_reader = dataset.BatchDatset(VALIDATION_PATH,FLAGS.zone, image_options)
-
+    # print("train_dataset_reader:",type(train_dataset_reader))
+    # print("train_dataset_reader.images:",type(train_dataset_reader.images))
+    # print("train_dataset_reader.grids:",type(train_dataset_reader.grids))
+    # print("train_dataset_reader.grids:",type(train_dataset_reader.grids))
+    # # print("train_dataset_reader:\n",type(train_dataset_reader))
 
     # start to run the graph #
     sess = tf.Session()
@@ -230,6 +246,11 @@ def main(argv=None):
     if FLAGS.mode == "train":
         for itr in xrange(MAX_ITERATION):
             train_images, train_annotations = train_dataset_reader.next_batch(FLAGS.batch_size)
+            # print("train_images.shape:",train_images.shape)
+            # print("train_images:",train_images)
+            # print("train_annotations.shape:",train_annotations.shape)
+            # print("train_annotations:",train_annotations)
+
             feed_dict = {image: train_images, annotation: train_annotations, keep_probability: 0.85}
 
             sess.run(train_op, feed_dict=feed_dict)
@@ -237,9 +258,10 @@ def main(argv=None):
             if itr % 10 == 0:
                 train_loss, summary_str = sess.run([loss, summary_op], feed_dict=feed_dict)
                 print("Step: %d, Train_loss:%g" % (itr, train_loss))
+                # print("Step: %d, summary_str:%s" % (itr, summary_str))
                 summary_writer.add_summary(summary_str, itr)
 
-            if itr % 500 == 0:
+            if itr % 100 == 0:
                 valid_images, valid_annotations = validation_dataset_reader.next_batch(FLAGS.batch_size)
                 valid_loss = sess.run(loss, feed_dict={image: valid_images, annotation: valid_annotations,
                                                        keep_probability: 1.0})

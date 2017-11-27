@@ -82,7 +82,7 @@ class BatchDatset:
         ele_scaler = preprocessing.MinMaxScaler()
         ele_scaler.feature_range = (0, self.image_options['image_size'] - 1)
         # print(ele_scaler.get_params())
-        print(ele_scaler.fit(elements))
+        ele_scaler.fit(elements)
         ele_trans = ele_scaler.transform(elements)
 
         # round the numbers
@@ -106,7 +106,7 @@ class BatchDatset:
             image: 基于p，rho，热通量等生成的图片
             grid: 网格信息，共四层，依次分别为m,h,b,a
         '''
-        image = np.zeros(shape=[self.image_options['image_size'], self.image_options['image_size']])
+        image = np.zeros(shape=[self.image_options['image_size'], self.image_options['image_size'],1])
         grid = np.zeros(shape=[self.image_options['image_size'], self.image_options['image_size'],4])
 
         for i in range(len(self.ele_to_image)):
@@ -115,10 +115,10 @@ class BatchDatset:
             y = int(self.ele_to_image[i][2])
             g = grid[x][y][0]
             if g == 0.:
-                image[x][y] = elements[3][e]
+                image[x][y][0] = elements[3][e]
                 grid[x][y][0] += 1
             else:
-                image[x][y] = (image[x][y] * g + elements[3][e]) / (g + 1)
+                image[x][y][0] = (image[x][y][0] * g + elements[3][e]) / (g + 1)
                 grid[x][y][0] += 1
         for i in range(len(grid)):
             for j in range(len(grid[0])):
@@ -151,15 +151,15 @@ class BatchDatset:
     def _read_images(self,inpath,inzone):
         for root, dirs, files in os.walk(inpath):
             for f in files:
-
+                # print(f)
                 par = f.split('_')
                 [m, h, b, a] = par[:4]
                 zone = par[6]
 
                 if zone == inzone:
                     filepath = os.path.join(root, f)
-                    print(filepath)
-                    print(m, h, b, a, zone)
+                    # print(filepath)
+                    # print(m, h, b, a, zone)
 
                     m = float(m.replace('m', ''))
                     h = float(h.replace('h', ''))

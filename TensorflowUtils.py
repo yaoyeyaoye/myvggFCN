@@ -106,6 +106,15 @@ def conv2d_strided(x, W, b):
 
 
 def conv2d_transpose_strided(x, W, b, output_shape=None, stride = 2):
+    '''
+
+    :param x:
+    :param W:
+    :param b:
+    :param output_shape: 反卷积输出的shape
+    :param stride: 步长
+    :return:
+    '''
     # print x.get_shape()
     # print W.get_shape()
     if output_shape is None:
@@ -115,6 +124,7 @@ def conv2d_transpose_strided(x, W, b, output_shape=None, stride = 2):
         output_shape[3] = W.get_shape().as_list()[2]
     # print output_shape
     conv = tf.nn.conv2d_transpose(x, W, output_shape, strides=[1, stride, stride, 1], padding="SAME")
+    # conv2d_transpose_strided 反卷积
     return tf.nn.bias_add(conv, b)
 
 
